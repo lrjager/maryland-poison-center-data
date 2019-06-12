@@ -172,5 +172,222 @@ pdfMPC.page1("Prince Georges County Statistical Report 2018.pdf")
 pdfMPC.page1("Talbot County Statistical Report 2018.pdf")
 ```
 
-I get warnings with both of these additional files.  I expected the issue with Price George's County, because there is an additional blurb at the top that reads "NOTE: This report reflects only the calls to the Maryland Poison Center from Prince Georges County. For complete statistics regarding Prince Georges County, statistics from the National Capitol Poison Center should also be consulted." I am surprise this happed with Talbot, since at a glad the structure of the file looks the same.  But the location data must not actually be the same, and this is the issue with hard coding amounts to determine the header and columns.  I need to look at both of these pdfs through `pdff_data()` to see how different they look.
+I get warnings with both of these additional files.  I expected the issue with Price George's County, because there is an additional note at the top that reads "NOTE: This report reflects only the calls to the Maryland Poison Center from Prince Georges County. For complete statistics regarding Prince Georges County, statistics from the National Capitol Poison Center should also be consulted." I am surprise this happed with Talbot, since at a glad the structure of the file looks the same.  But the location data must not actually be the same, and this is the issue with hard coding amounts to determine the header and columns.  I need to look at both of these pdfs through `pdf_data()` to see how different they look.
 
+```{r}
+pgData <- pdf_data("Prince Georges County Statistical Report 2018.pdf")[[1]]
+tData <- pdf_data("Talbot County Statistical Report 2018.pdf")[[1]]
+aData <- pdf_data("Allegany County Statistical Report 2018.pdf")[[1]]
+```
+
+First I will check where the columns divide for these three files.  For Allegany County it was x=258, so I cut at x<260 to divide into columns.  
+```{r}
+aData %>% group_by(x) %>% arrange(y, .by_group=TRUE) %>% as.data.frame()
+pgData %>% group_by(x) %>% arrange(y, .by_group=TRUE) %>% as.data.frame()
+tData %>% group_by(x) %>% arrange(y, .by_group=TRUE) %>% as.data.frame()
+```
+
+It appears to be the same place for each of these two files.  Additionally, the next x values for these three files is 266, 265, and 266, respectively.  (PG county is a little different because of the additional note at the top.)  Cutting at x<260 is reasonable.
+
+Now I will check where the header divides for these three files.  For Allegany County it was at y=159, so I cut at y > 160.
+```{r}
+aData %>% group_by(y) %>% summarize(n=n())
+pgData %>% group_by(y) %>% summarize(n=n())
+tData %>% group_by(y) %>% summarize(n=n())
+```
+
+The header ends at 159 for Allegany, with the next row at 187.  For PG County, the header ends at 199, with the next row at 227.  For Talbot, the header ends at 164, with the next row at 192.
+
+For Allegany and Talbot, there is a slight spacing difference that could be fixed by cutting lower down in the document, say y > 175.  For PG County (and Montgomery County, which has a similar note), the cut needs to be more specific to these documents.
+
+I think it makes more sense to cut after the 3rd line (whatever y-value that line may have) for all but the two different counties, and then cut after the 6th line for these two counties specifically.  This is better than hard coding y-values for cutting, which may differ with slight changes in spacing (single vs. double space, etc).  I should probably do this for deciding the columns as well, but I'm not going to worry about that now.
+
+```{r}
+y.cut <- aData %>% 
+  group_by(y) %>% 
+  arrange(y) %>% 
+  summarize(n=n()) %>% 
+  slice(3) %>% 
+  select(y) %>% 
+  as.numeric()
+
+y.cut
+
+y.cut <- pgData %>% 
+  group_by(y) %>% 
+  arrange(y) %>% 
+  summarize(n=n()) %>% 
+  slice(6) %>% 
+  select(y) %>% 
+  as.numeric()
+
+y.cut
+```
+
+So my updated function is:
+
+```{r}
+pdfMPC.page1 <- function(pdf.file) {
+  require(dplyr)
+  require(pdftools)
+ 
+# read in the pdf document; select the first page 
+pdfData <- pdf_data(pdf.file)
+p1Data <- pdfData[[1]]
+
+# get the year and country from the header
+orderedData <- p1Data %>% arrange(y,x)
+year <- orderedData$text[1]
+county <- paste(orderedData$text[4:5],collapse=" ")
+county = gsub(",","",county)
+
+# remove the header 
+# the first 3 lines for most, the first 6 lines for PG and M counties
+if (county=="Prince Georges County" | county=="Montgomery County") {
+  y.cut <- p1Data %>% group_by(y) %>% arrange(y) %>% summarize(n=n()) %>%
+    slice(6) %>% select(y) %>% as.numeric()
+  p1Data <- p1Data %>% filter(y > y.cut + 1)
+} else {
+  y.cut <- p1Data %>% group_by(y) %>% arrange(y) %>% summarize(n=n()) %>%
+    slice(3) %>% select(y) %>% as.numeric()
+  p1Data <- p1Data %>% filter(y > y.cut + 1)
+}
+
+# create the column variable (Left/Right)
+p1Data <- p1Data %>%
+  mutate(column=ifelse(x < 260, "Left", "Right"))
+
+# group the data by column and height on the page
+# keep the last entry of that column/height as the value
+# assign the remaining entries for that column/height the name
+groupedData <- p1Data %>% 
+  group_by(column,y) %>% 
+  arrange(x, .by_group=TRUE) %>%
+  mutate(type = ifelse(x==max(x), "value", "name"))
+
+# collapse the entries for name together to create the variable name
+# keep the value as the count
+countData <- groupedData %>% 
+  group_by(column, y) %>%
+  arrange(x, .by_group=TRUE) %>%
+  summarize(variable = paste(text[type=="name"], collapse=" "), count=text[type=="value"])
+
+# remove the rows that aren't variables/counts
+countData <- countData %>% filter(count != "Calls", count!="exposure", count!="Site", count!="Outcome")
+
+# create the data frame for this county/date
+myRow <- as.data.frame(t(as.numeric(countData$count)))
+names(myRow) <- countData$variable
+myRow$Year <- year
+myRow$County <- county
+
+return(myRow)
+}
+```
+
+Try out this function on these three files:
+```{r}
+pdfMPC.page1("Allegany County Statistical Report 2018.pdf")
+pdfMPC.page1("Prince Georges County Statistical Report 2018.pdf")
+pdfMPC.page1("Talbot County Statistical Report 2018.pdf")
+```
+
+Still not quite working, because the county name for PG County has three words, not two.  This will be true for 4 of the counties, so need to re-write the part that assigns the county name.  I'm going to collapse the whole row, which will include the ", MD" part.
+```{r}
+year <- pgData %>% arrange(y,x) %>% slice(1) %>% select(text) %>% as.numeric()
+
+county <- pgData %>% group_by(y) %>%
+  arrange(x, .by_group=TRUE) %>% 
+  summarize(line = paste(text, collapse=" ")) %>%
+  slice(2) %>% select(line) %>% as.character()
+```
+
+Now, again, my updated function becomes:
+```{r}
+pdfMPC.page1 <- function(pdf.file) {
+  require(dplyr)
+  require(pdftools)
+ 
+# read in the pdf document; select the first page 
+pdfData <- pdf_data(pdf.file)
+p1Data <- pdfData[[1]]
+
+# get the year and country from the header
+year <- p1Data %>% arrange(y,x) %>% slice(1) %>% select(text) %>% as.numeric()
+
+county <- p1Data %>% group_by(y) %>%
+  arrange(x, .by_group=TRUE) %>% 
+  summarize(line = paste(text, collapse=" ")) %>%
+  slice(2) %>% select(line) %>% as.character()
+
+# remove the header 
+# the first 3 lines for most, the first 6 lines for PG and M counties
+if (county=="Prince Georges County, MD" | county=="Montgomery County, MD") {
+  y.cut <- p1Data %>% group_by(y) %>% arrange(y) %>% summarize(n=n()) %>%
+    slice(6) %>% select(y) %>% as.numeric()
+  p1Data <- p1Data %>% filter(y > y.cut + 1)
+} else {
+  y.cut <- p1Data %>% group_by(y) %>% arrange(y) %>% summarize(n=n()) %>%
+    slice(3) %>% select(y) %>% as.numeric()
+  p1Data <- p1Data %>% filter(y > y.cut + 1)
+}
+
+# create the column variable (Left/Right)
+p1Data <- p1Data %>%
+  mutate(column=ifelse(x < 260, "Left", "Right"))
+
+# group the data by column and height on the page
+# keep the last entry of that column/height as the value
+# assign the remaining entries for that column/height the name
+groupedData <- p1Data %>% 
+  group_by(column,y) %>% 
+  arrange(x, .by_group=TRUE) %>%
+  mutate(type = ifelse(x==max(x), "value", "name"))
+
+# collapse the entries for name together to create the variable name
+# keep the value as the count
+countData <- groupedData %>% 
+  group_by(column, y) %>%
+  arrange(x, .by_group=TRUE) %>%
+  summarize(variable = paste(text[type=="name"], collapse=" "), count=text[type=="value"])
+
+# remove the rows that aren't variables/counts
+countData <- countData %>% filter(count != "Calls", count!="exposure", count!="Site", count!="Outcome")
+
+# create the data frame for this county/date
+myRow <- as.data.frame(t(as.numeric(countData$count)))
+names(myRow) <- countData$variable
+myRow$Year <- year
+myRow$County <- county
+
+return(myRow)
+}
+```
+
+Try out this function on these three files:
+```{r}
+pdfMPC.page1("Allegany County Statistical Report 2018.pdf")
+pdfMPC.page1("Prince Georges County Statistical Report 2018.pdf")
+pdfMPC.page1("Talbot County Statistical Report 2018.pdf")
+```
+
+Now merge these files together into a single data frame:
+```{r}
+d1 <- pdfMPC.page1("Allegany County Statistical Report 2018.pdf")
+d2 <- pdfMPC.page1("Prince Georges County Statistical Report 2018.pdf")
+d3 <- pdfMPC.page1("Talbot County Statistical Report 2018.pdf")
+
+dim(d1)
+dim(d2)
+dim(d3)
+
+myData <- bind_rows(d1,d2,d3)
+dim(myData)
+names(myData)
+myData$`Contamination/Tampering`
+myData$`Contamination/tampering`
+```
+
+We can see that there are a couple of variable names that don't match perfectly between the different files: in one file, the names is "Contamination/tampering" and in the other it is "Contamination/Tampering."  And each of the three files is different for the Unknown/Other reason for exposure: "Other/Unknown", "Unknown Reason", "Unknown/Other"
+
+I figure that these same types of issues will happen for other variable names in other files, so I think this is something to address while processing after merging.  The `bind_rows()` function will make sure it takes all of these and will put in `NA` where appropriate, so I will clean this after!
