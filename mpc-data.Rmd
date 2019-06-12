@@ -109,3 +109,68 @@ myRow$County <- county
 
 myRow
 ```
+
+Now to make this into a function that is given the pdf file and returns the row of data:
+
+```{r}
+
+#pdf.file <- "Allegany County Statistical Report 2018.pdf"
+
+pdfMPC.page1 <- function(pdf.file) {
+  require(dplyr)
+  require(pdftools)
+ 
+# read in the pdf document; select the first page 
+pdfData <- pdf_data(pdf.file)
+p1Data <- pdfData[[1]]
+
+# get the year and country from the header
+orderedData <- p1Data %>% arrange(y,x)
+year <- orderedData$text[1]
+county <- paste(orderedData$text[4:5],collapse=" ")
+county = gsub(",","",county)
+
+# remove the header
+p1Data <- p1Data %>% filter(y > 160)
+
+# create the column variable (Left/Right)
+p1Data <- p1Data %>%
+  mutate(column=ifelse(x < 260, "Left", "Right"))
+
+# group the data by column and height on the page
+# keep the last entry of that column/height as the value
+# assign the remaining entries for that column/height the name
+groupedData <- p1Data %>% 
+  group_by(column,y) %>% 
+  arrange(x, .by_group=TRUE) %>%
+  mutate(type = ifelse(x==max(x), "value", "name"))
+
+# collapse the entries for name together to create the variable name
+# keep the value as the count
+countData <- groupedData %>% 
+  group_by(column, y) %>%
+  arrange(x, .by_group=TRUE) %>%
+  summarize(variable = paste(text[type=="name"], collapse=" "), count=text[type=="value"])
+
+# remove the rows that aren't variables/counts
+countData <- countData %>% filter(count != "Calls", count!="exposure", count!="Site", count!="Outcome")
+
+# create the data frame for this county/date
+myRow <- as.data.frame(t(as.numeric(countData$count)))
+names(myRow) <- countData$variable
+myRow$Year <- year
+myRow$County <- county
+
+return(myRow)
+}
+```
+
+Try out this function on the original dataset and two more files:
+```{r}
+pdfMPC.page1("Allegany County Statistical Report 2018.pdf")
+pdfMPC.page1("Prince Georges County Statistical Report 2018.pdf")
+pdfMPC.page1("Talbot County Statistical Report 2018.pdf")
+```
+
+I get warnings with both of these additional files.  I expected the issue with Price George's County, because there is an additional blurb at the top that reads "NOTE: This report reflects only the calls to the Maryland Poison Center from Prince Georges County. For complete statistics regarding Prince Georges County, statistics from the National Capitol Poison Center should also be consulted." I am surprise this happed with Talbot, since at a glad the structure of the file looks the same.  But the location data must not actually be the same, and this is the issue with hard coding amounts to determine the header and columns.  I need to look at both of these pdfs through `pdff_data()` to see how different they look.
+
