@@ -1,0 +1,111 @@
+---
+title: "Maryland Poison Center (MPC) data"
+author: "Leah Jager"
+date: "6/11/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r packages}
+library(tidyverse)
+library(pdftools)
+```
+
+### Reading in data from a single file: Allegany County, 2018
+
+Do I want to use `pdf_data()` or `pdf_text()`?  Let's see what each does for my file.  First, using `pdf_text()`:
+```{r}
+myData <- pdf_text("Allegany County Statistical Report 2018.pdf")
+myData
+myData[[1]]
+
+myData2 <- pdf_data("Allegany County Statistical Report 2018.pdf")
+myData2
+myData2[[1]]
+```
+Both options separate the text from the two pages of the file, which is ideal since I am initially only going to pull the data from the first page.  If I use `pdf_text()` I will have to split on the newline character in order to separate the rows of data, but with `pdf_data()` it is already split to the individual words.  I do want to keep lines of words together, such as "< 12 months", etc for the ages and "Healthcare Facility" for the site, but I think I can do this after `pdf_data()` by using the (x,y) location variables for the text boxes:
+```{r}
+pdfData <- pdf_data("Allegany County Statistical Report 2018.pdf")
+p1Data <- pdfData[[1]]
+
+lineData <- p1Data %>% 
+  group_by(y) %>% 
+  arrange(x, .by_group=TRUE) %>%
+  summarize(line = paste(text, collapse=" "))
+
+lineData
+```
+
+Now I still have the problem of the fact that there are really two columns worth of data on this page of the pdf, which is reflected in row 5 of this line data frame, where we see there are 529 total human exposures and 24 animal exposures, both recorded on the same line of the pdf:
+```{r}
+lineData[5,]
+```
+
+I wonder if I can first split the data into two groups by column, and then group by the y value:
+```{r}
+p1Data %>% group_by(x) %>% arrange(y, .by_group=TRUE) %>% as.data.frame()
+```
+
+The end of the first column is at y=258, so I will create a new column to designate left/right column.  Then I can group by this left/right column before grouping by y and summarizing by collapsing across x:
+```{r}
+p1Data <- p1Data %>%
+  mutate(column=ifelse(x < 260, "Left", "Right"))
+
+lineData <- p1Data %>% 
+  group_by(column,y) %>% 
+  arrange(x, .by_group=TRUE) %>%
+  summarize(line = paste(text, collapse=" "))
+```
+
+This is looking really good!  However the header of the pdf is causing trouble, since it bridges the two columns.  It will be easier if I remove it, but first I want to extract the county name and the year:
+
+```{r}
+orderedData <- p1Data %>% arrange(y,x)
+year <- orderedData$text[1]
+county <- paste(orderedData$text[4:5],collapse=" ")
+county = gsub(",","",county)
+```
+
+Now I will remove these header rows and split into two columns.  I want to remove the first 3 rows of the data, which occur up to position y=159.
+```{r}
+p1Data %>% group_by(y) %>% summarize(n=n())
+
+p1Data <- p1Data %>% filter(y > 160)
+
+lineData <- p1Data %>% 
+  group_by(column,y) %>% 
+  arrange(x, .by_group=TRUE) %>%
+  summarize(line = paste(text, collapse=" "))
+
+lineData %>% as.data.frame()
+```
+
+Now I don't think I actually want to collapse across all words in a row, I want to keep the last word as the value and the previous words as the variable name:
+
+```{r}
+groupedData <- p1Data %>% 
+  group_by(column,y) %>% 
+  arrange(x, .by_group=TRUE) %>%
+  mutate(type = ifelse(x==max(x), "value", "name"))
+
+countData <- groupedData %>% 
+  group_by(column, y) %>%
+  arrange(x, .by_group=TRUE) %>%
+  summarize(variable = paste(text[type=="name"], collapse=" "), count=text[type=="value"])
+
+countData %>% as.data.frame()
+
+countData <- countData %>% filter(count != "Calls", count!="exposure", count!="Site", count!="Outcome")
+
+countData <- t(countData)
+
+myRow <- as.data.frame(t(as.numeric(countData$count)))
+names(myRow) <- countData$variable
+myRow$Year <- year
+myRow$County <- county
+
+myRow
+```
