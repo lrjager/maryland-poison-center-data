@@ -303,7 +303,7 @@ county <- pgData %>% group_by(y) %>%
 ```
 
 Now, again, my updated function becomes:
-```{r}
+```{r finalFunction}
 pdfMPC.page1 <- function(pdf.file) {
   require(dplyr)
   require(pdftools)
@@ -391,3 +391,162 @@ myData$`Contamination/tampering`
 We can see that there are a couple of variable names that don't match perfectly between the different files: in one file, the names is "Contamination/tampering" and in the other it is "Contamination/Tampering."  And each of the three files is different for the Unknown/Other reason for exposure: "Other/Unknown", "Unknown Reason", "Unknown/Other"
 
 I figure that these same types of issues will happen for other variable names in other files, so I think this is something to address while processing after merging.  The `bind_rows()` function will make sure it takes all of these and will put in `NA` where appropriate, so I will clean this after!
+
+### Reading in the data from urls
+
+The url links have the form:
+https://www.mdpoison.com/media/SOP/mdpoisoncom/factsandreports/reports/countypdf2018/Allegany%20County%20Statistical%20Report%202018.pdf
+
+This in general looks like:
+https://www.mdpoison.com/media/SOP/mdpoisoncom/factsandreports/reports/countypdf**year**/**County%20Name%20**Statistical%20Report%20**year**.pdf
+
+where **County%20Name%20** is the name of the county with %20 as spaces and **year** is the year of the data.  County names with punctuation (periods, apostrophes) drop the punctuation in the link name. 
+
+We can go back through 2006; reports prior to 2006 have a different format so we will skip them for now.  (There are only two additional years, 2004 and 2005, and the format is very different, so may not be worth even trying to add to the data set.) 
+
+We also need the names of the pdf files themselves to download from the web.  These are of the form:
+"Allegany County Statistical Report 2018.pdf"
+
+The 2016 links are a little bit different:
+https://www.mdpoison.com/media/SOP/mdpoisoncom/factsandreports/reports/**county-pdf-2016**/Allegany%20County%20Statistical%20Report%202016.pdf
+
+so will have to account for that
+
+Here we set up the counties and years we need to read in:
+```{r}
+countyNames <- c("Allegany County", "Anne Arundel County", "Baltimore City", "Baltimore County", "Calvert County", "Caroline County", "Carroll County", "Cecil County", "Charles County", "Dorchester County", "Frederick County", "Garrett County", "Harford County", "Howard County", "Kent County", "Montgomery County", "Prince Georges County", "Queen Annes County", "Somerset County", "St Marys County", "Talbot County", "Washington County", "Wicomico County", "Worcester County")
+
+years <- 2006:2018
+```
+
+Now we create all of the links for each county/year combination:
+```{r}
+links <- NULL
+files <- NULL
+for (i in years) {
+  for (j in countyNames) {
+    countyNameForLink <- paste(unlist(strsplit(j, " ")), collapse="%20")
+    if (i != 2016) {
+      tempLink <- paste0("https://www.mdpoison.com/media/SOP/mdpoisoncom/factsandreports/reports/countypdf",i,"/",countyNameForLink,"%20Statistical%20Report%20",i,".pdf")} else {
+      tempLink <- paste0("https://www.mdpoison.com/media/SOP/mdpoisoncom/factsandreports/reports/county-pdf-",i,"/",countyNameForLink,"%20Statistical%20Report%20",i,".pdf")}
+    tempFile <- paste0(j," Statistical Report ", i,".pdf")
+    links <- c(links, tempLink)
+    files <- c(files, tempFile)
+  }
+}
+```
+
+I am going to download these to a subfolder in my directory and not upload to Github.  So first I will create a data subfolder and then change the work the subdirectory to the file names and then try downloading a file:
+```{r}
+download.file(links[1], paste0("./data/",files[1]))
+```
+
+Now to download them all:
+```{r}
+length(links)
+for (i in 1:length(links)) {
+  download.file(links[i], paste0("./data/",files[i]))
+}
+```
+
+I should have 312 files in my folder now; I confirmed this!
+
+Now I will put each one of these files through my pdf function and merge them together!  *fingers crossed*
+
+```{r}
+
+d1 <- pdfMPC.page1(paste0("./data/",files[1]))
+myData <- d1
+
+options(warn=2)
+for (i in 2:length(files)) {
+  di <- pdfMPC.page1(paste0("./data/",files[i]))
+  myData <- bind_rows(myData,di)
+  print(i)
+}
+
+dim(myData)
+names(myData)
+```
+
+Need to trouble shoot some particular files:
+
+Notes:
+
+(1) Had to modify to remove commas from counts: 5,321 to 5321 (Baltimore County 2006)
+(2) Had to modify to account for blank counts; for now I am setting those to 0.  Should probably set them to NA? This also required me to modify how labeling the name and the value, since this row only had a name not a value. (Somerset 2006)
+(3) Some files have "Maryland Poison Center" printed at bottom of page 1, need to remove this (Cecil 2007)
+(4) I think because of the apostrophe maybe, it's saying part of the header is actually two different heights, so it's split it into 2 pieces, which means I can't cut after 3rd line, really need to cut after 4th. Make a special case for this one file.(Queen Annes 2011)
+(5) Same issue as for Queen Annes, just included it in the exception  (St Marys 2011)
+```{r updateFunction}
+
+pdf.file <- paste0("./data/",files[140])
+pdfMPC.page1 <- function(pdf.file) {
+  require(dplyr)
+  require(pdftools)
+ 
+# read in the pdf document; select the first page 
+pdfData <- pdf_data(pdf.file)
+p1Data <- pdfData[[1]]
+
+# get the year and country from the header
+year <- p1Data %>% arrange(y,x) %>% slice(1) %>% select(text) %>% as.numeric()
+
+county <- p1Data %>% group_by(y) %>%
+  arrange(x, .by_group=TRUE) %>% 
+  summarize(line = paste(text, collapse=" ")) %>%
+  slice(2) %>% select(line) %>% as.character()
+
+# remove the header 
+# the first 3 lines for most, the first 6 lines for PG and M counties
+if (county=="Prince Georges County, MD" | county=="Montgomery County, MD") {
+  y.cut <- p1Data %>% group_by(y) %>% arrange(y) %>% summarize(n=n()) %>%
+    slice(6) %>% select(y) %>% as.numeric()
+  p1Data <- p1Data %>% filter(y > y.cut + 1)
+} else {
+  if (county=="Queen Anne’s" | county=="St. Mary’s") {
+      y.cut <- p1Data %>% group_by(y) %>% arrange(y) %>% summarize(n=n()) %>%
+    slice(4) %>% select(y) %>% as.numeric()
+  p1Data <- p1Data %>% filter(y > y.cut + 1)
+  county <- paste0(county," County, MD")
+  } else {
+    y.cut <- p1Data %>% group_by(y) %>% arrange(y) %>%
+      summarize(n=n()) %>%
+      slice(3) %>% select(y) %>% as.numeric()
+    p1Data <- p1Data %>% filter(y > y.cut + 1)
+  }
+}
+
+# create the column variable (Left/Right)
+p1Data <- p1Data %>%
+  mutate(column=ifelse(x < 265, "Left", "Right"))
+
+# group the data by column and height on the page
+# keep the last entry of that column/height as the value
+# assign the remaining entries for that column/height the name
+groupedData <- p1Data %>% 
+  group_by(column,y) %>% 
+  arrange(x, .by_group=TRUE) %>%
+  mutate(type = ifelse(x==max(x) & x==min(x), "name", ifelse(x==max(x), "value", "name")))
+
+# collapse the entries for name together to create the variable name
+# keep the value as the count
+countData <- groupedData %>% 
+  group_by(column, y) %>%
+  arrange(x, .by_group=TRUE) %>%
+  summarize(variable = paste(text[type=="name"], collapse=" "), count=ifelse(is_empty(text[type=="value"])==FALSE, text[type=="value"],"0"))
+
+# remove the rows that aren't variables/counts
+countData <- countData %>% filter(count != "Calls", count!="exposure", count!="Site", count!="Outcome", count!="Center", variable!="Maryland")
+
+# create the data frame for this county/date
+myRow <- as.data.frame(t(as.numeric(gsub(",","",countData$count))))
+names(myRow) <- countData$variable
+myRow$Year <- year
+myRow$County <- county
+
+return(myRow)
+}
+```
+
+The above function now works for all the files!  I am going to need to find a way to identify which "Unknown" and "Others" go with which subcategories, since it's impossible to tell just from the combined files.  Maybe can use the indenting to do this?  Then will have to do some major data cleaning for all the slightly different variations on the names of categories.  
