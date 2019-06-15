@@ -550,3 +550,110 @@ return(myRow)
 ```
 
 The above function now works for all the files!  I am going to need to find a way to identify which "Unknown" and "Others" go with which subcategories, since it's impossible to tell just from the combined files.  Maybe can use the indenting to do this?  Then will have to do some major data cleaning for all the slightly different variations on the names of categories.  
+
+```{r}
+names(myData)
+myNames <- data.frame(names=names(myData))
+myNames %>% arrange(names)
+```
+
+First I am going to assign higher categories to help sort out which group the other's/unknowns come from:
+
+The higher categories are:
+Left column:
+Total human exposures to Reason for exposure, give subcategory "Age:"
+Unintentional to Intentional, give subcategory "RFE-Unintent:"
+Intentional to Other, give subcategory "RFE-Intent:"
+Other to end, give subcategory "RFE-Other:"
+
+Right column: 
+Management Site to Medical Outcome, give subcategory "MS"
+Medical outcome to end, give subcategory "MO"
+
+
+```{r updateFunctionSubCats}
+
+pdf.file <- paste0("./data/",files[1])
+pdfMPC.page1 <- function(pdf.file) {
+  require(dplyr)
+  require(pdftools)
+ 
+# read in the pdf document; select the first page 
+pdfData <- pdf_data(pdf.file)
+p1Data <- pdfData[[1]]
+
+# get the year and country from the header
+year <- p1Data %>% arrange(y,x) %>% slice(1) %>% select(text) %>% as.numeric()
+
+county <- p1Data %>% group_by(y) %>%
+  arrange(x, .by_group=TRUE) %>% 
+  summarize(line = paste(text, collapse=" ")) %>%
+  slice(2) %>% select(line) %>% as.character()
+
+# remove the header 
+# the first 3 lines for most, the first 6 lines for PG and M counties
+if (county=="Prince Georges County, MD" | county=="Montgomery County, MD") {
+  y.cut <- p1Data %>% group_by(y) %>% arrange(y) %>% summarize(n=n()) %>%
+    slice(6) %>% select(y) %>% as.numeric()
+  p1Data <- p1Data %>% filter(y > y.cut + 1)
+} else {
+  if (county=="Queen Anne’s" | county=="St. Mary’s") {
+      y.cut <- p1Data %>% group_by(y) %>% arrange(y) %>% summarize(n=n()) %>%
+    slice(4) %>% select(y) %>% as.numeric()
+  p1Data <- p1Data %>% filter(y > y.cut + 1)
+  county <- paste0(county," County, MD")
+  } else {
+    y.cut <- p1Data %>% group_by(y) %>% arrange(y) %>%
+      summarize(n=n()) %>%
+      slice(3) %>% select(y) %>% as.numeric()
+    p1Data <- p1Data %>% filter(y > y.cut + 1)
+  }
+}
+
+# create the column variable (Left/Right)
+p1Data <- p1Data %>%
+  mutate(column=ifelse(x < 265, "Left", "Right"))
+
+# group the data by column and height on the page
+# keep the last entry of that column/height as the value
+# assign the remaining entries for that column/height the name
+groupedData <- p1Data %>% 
+  group_by(column,y) %>% 
+  arrange(x, .by_group=TRUE) %>%
+  mutate(type = ifelse(x==max(x) & x==min(x), "name", ifelse(x==max(x), "value", "name")))
+
+# collapse the entries for name together to create the variable name
+# keep the value as the count
+countData <- groupedData %>% 
+  group_by(column, y) %>%
+  arrange(x, .by_group=TRUE) %>%
+  summarize(variable = paste(text[type=="name"], collapse=" "), count=ifelse(is_empty(text[type=="value"])==FALSE, text[type=="value"],"0"))
+
+y.age.min <- countData$y[countData$variable=="Total human exposures"]
+y.age.max <- countData$y[countData$variable=="Reason for"]
+y.un.min <- countData$y[countData$variable=="Unintentional"]
+y.un.max <- countData$y[countData$variable=="Intentional"]
+y.int.min <- countData$y[countData$variable=="Intentional"]
+y.int.max <- countData$y[countData$variable=="Other"]
+y.other.min <- countData$y[countData$variable=="Other"]
+
+y.ms.min <- countData$y[countData$variable=="Management"]
+y.ms.max <- countData$y[countData$variable=="Medical"]
+y.mo.min <- countData$y[countData$variable=="Medical"]
+
+countData <- countData %>%
+  mutate(variableSub=ifelse(column=="Left" & y > y.age.min & y < y.age.max))
+
+
+# remove the rows that aren't variables/counts
+countData <- countData %>% filter(count != "Calls", count!="exposure", count!="Site", count!="Outcome", count!="Center", variable!="Maryland")
+
+# create the data frame for this county/date
+myRow <- as.data.frame(t(as.numeric(gsub(",","",countData$count))))
+names(myRow) <- countData$variable
+myRow$Year <- year
+myRow$County <- county
+
+return(myRow)
+}
+```
