@@ -954,6 +954,8 @@ namesNew <- gsub(pattern=" a",replacement=" A", namesNew)
 namesNew <- gsub(pattern=" c",replacement=" C", namesNew)
 namesNew <- gsub(pattern="Site.non",replacement="Site.Non", namesNew)
 namesNew <- gsub(pattern=" ",replacement="", namesNew)
+
+names(myData) <- namesNew
 ```
 
 Now write this data to a .csv file again:
