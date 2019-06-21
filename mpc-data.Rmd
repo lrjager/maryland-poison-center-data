@@ -100,8 +100,6 @@ countData %>% as.data.frame()
 
 countData <- countData %>% filter(count != "Calls", count!="exposure", count!="Site", count!="Outcome")
 
-countData <- t(countData)
-
 myRow <- as.data.frame(t(as.numeric(countData$count)))
 names(myRow) <- countData$variable
 myRow$Year <- year
@@ -467,6 +465,7 @@ for (i in 2:length(files)) {
 
 dim(myData)
 names(myData)
+sort(names(myData))
 ```
 
 Need to trouble shoot some particular files:
@@ -478,6 +477,7 @@ Notes:
 (3) Some files have "Maryland Poison Center" printed at bottom of page 1, need to remove this (Cecil 2007)
 (4) I think because of the apostrophe maybe, it's saying part of the header is actually two different heights, so it's split it into 2 pieces, which means I can't cut after 3rd line, really need to cut after 4th. Make a special case for this one file.(Queen Annes 2011)
 (5) Same issue as for Queen Annes, just included it in the exception  (St Marys 2011)
+
 ```{r updateFunction}
 
 pdf.file <- paste0("./data/",files[140])
@@ -573,7 +573,7 @@ Medical outcome to end, give subcategory "MO"
 
 ```{r updateFunctionSubCats}
 
-pdf.file <- paste0("./data/",files[1])
+pdf.file <- paste0("./data/",files[148])
 pdfMPC.page1 <- function(pdf.file) {
   require(dplyr)
   require(pdftools)
@@ -627,33 +627,265 @@ groupedData <- p1Data %>%
 countData <- groupedData %>% 
   group_by(column, y) %>%
   arrange(x, .by_group=TRUE) %>%
-  summarize(variable = paste(text[type=="name"], collapse=" "), count=ifelse(is_empty(text[type=="value"])==FALSE, text[type=="value"],"0"))
+  summarize(variable = paste(text[type=="name"], collapse=" "), count=ifelse(is_empty(text[type=="value"])==FALSE, text[type=="value"],"0"), xmin=min(x))
+
 
 y.age.min <- countData$y[countData$variable=="Total human exposures"]
 y.age.max <- countData$y[countData$variable=="Reason for"]
 y.un.min <- countData$y[countData$variable=="Unintentional"]
 y.un.max <- countData$y[countData$variable=="Intentional"]
 y.int.min <- countData$y[countData$variable=="Intentional"]
-y.int.max <- countData$y[countData$variable=="Other"]
-y.other.min <- countData$y[countData$variable=="Other"]
+x.min <- min(countData$xmin[countData$column=="Left"])
+y.int.max <- countData$y[countData$column=="Left" & countData$variable=="Other" & countData$xmin==x.min]
+y.other.min <- countData$y[countData$column=="Left" & countData$variable=="Other" & countData$xmin==x.min]
 
 y.ms.min <- countData$y[countData$variable=="Management"]
 y.ms.max <- countData$y[countData$variable=="Medical"]
 y.mo.min <- countData$y[countData$variable=="Medical"]
 
 countData <- countData %>%
-  mutate(variableSub=ifelse(column=="Left" & y > y.age.min & y < y.age.max))
-
+  mutate(variableSub=ifelse(column=="Left" & y > y.age.min & y < y.age.max, "Age:",
+         ifelse(column=="Left" & y > y.un.min & y < y.un.max, "ReasonUn:",
+         ifelse(column=="Left" & y > y.int.min & y < y.int.max, "ReasonInt:",
+         ifelse(column=="Left" & y > y.other.min, "ReasonOther:",
+         ifelse(column=="Right" & y > y.ms.min & y < y.ms.max, "MS:",
+         ifelse(column=="Right" & y > y.mo.min, "MO:", "")))))))
 
 # remove the rows that aren't variables/counts
 countData <- countData %>% filter(count != "Calls", count!="exposure", count!="Site", count!="Outcome", count!="Center", variable!="Maryland")
 
+countData <- countData %>%
+  mutate(name=paste0(variableSub, variable))
+
 # create the data frame for this county/date
 myRow <- as.data.frame(t(as.numeric(gsub(",","",countData$count))))
-names(myRow) <- countData$variable
+names(myRow) <- countData$name
 myRow$Year <- year
 myRow$County <- county
 
 return(myRow)
 }
+```
+
+```{r}
+
+d1 <- pdfMPC.page1(paste0("./data/",files[1]))
+myData <- d1
+
+options(warn=2)
+for (i in 2:length(files)) {
+  di <- pdfMPC.page1(paste0("./data/",files[i]))
+  myData <- bind_rows(myData,di)
+  print(i)
+}
+
+dim(myData)
+names(myData)
+```
+
+Now have to fix some issues with this new update when it breaks for some counties/years
+
+(1) Baltimore County 2012; there is an "Other" listing in addition to the "Other" subcategory in the left column.  Don't just want to choose the first one, because what if the "Other" listing falls above for another county.  Going to use the indentation by keeping track of the minimum x value when I collapse; this will designate the difference between the subcategory and just a listing
+
+Well, it worked, but now I actually have MORE additional columns, and some of the sub-columns are now labeled with NA instead of the appropriate subcategory.
+
+```{r updateFunctionSubCats}
+
+pdf.file <- paste0("./data/",files[241])
+pdfMPC.page1 <- function(pdf.file, i) {
+  require(dplyr)
+  require(pdftools)
+ 
+# read in the pdf document; select the first page 
+pdfData <- pdf_data(pdf.file)
+p1Data <- pdfData[[1]]
+
+# get the year and country from the header
+year <- p1Data %>% arrange(y,x) %>% slice(1) %>% select(text) %>% as.numeric()
+
+county <- p1Data %>% group_by(y) %>%
+  arrange(x, .by_group=TRUE) %>% 
+  summarize(line = paste(text, collapse=" ")) %>%
+  slice(2) %>% select(line) %>% as.character()
+
+# remove the header 
+# the first 3 lines for most, the first 6 lines for PG and M counties
+if (county=="Prince Georges County, MD" | county=="Montgomery County, MD") {
+  y.cut <- p1Data %>% group_by(y) %>% arrange(y) %>% summarize(n=n()) %>%
+    slice(6) %>% select(y) %>% as.numeric()
+  p1Data <- p1Data %>% filter(y > y.cut + 1)
+} else {
+  if (county=="Queen Anne’s" | county=="St. Mary’s") {
+      y.cut <- p1Data %>% group_by(y) %>% arrange(y) %>% summarize(n=n()) %>%
+    slice(4) %>% select(y) %>% as.numeric()
+  p1Data <- p1Data %>% filter(y > y.cut + 1)
+  county <- paste0(county," County, MD")
+  } else {
+    y.cut <- p1Data %>% group_by(y) %>% arrange(y) %>%
+      summarize(n=n()) %>%
+      slice(3) %>% select(y) %>% as.numeric()
+    p1Data <- p1Data %>% filter(y > y.cut + 1)
+  }
+}
+
+# create the column variable (Left/Right)
+p1Data <- p1Data %>%
+  mutate(column=ifelse(x < 265, "Left", "Right"))
+
+# group the data by column and height on the page
+# keep the last entry of that column/height as the value
+# assign the remaining entries for that column/height the name
+groupedData <- p1Data %>% 
+  group_by(column,y) %>% 
+  arrange(x, .by_group=TRUE) %>%
+  mutate(type = ifelse(x==max(x) & x==min(x), "name", ifelse(x==max(x), "value", "name")))
+
+# collapse the entries for name together to create the variable name
+# keep the value as the count
+countData <- groupedData %>% 
+  group_by(column, y) %>%
+  arrange(x, .by_group=TRUE) %>%
+  summarize(variable = paste(text[type=="name"], collapse=" "), count=ifelse(is_empty(text[type=="value"])==FALSE, text[type=="value"],"0"), xmin=min(x))
+
+# remove the any variables/counts that include any part of "Maryland Center"
+countData <- countData %>% filter(count != "Maryland", count!="Center",  variable!="Maryland", variable!="Center", variable!="Types of", variable!="Reason for")
+
+## Designate the "Other Reason" variable to say "Other Reason"
+countData$variable[countData$variable=="Other" & countData$xmin==min(countData$xmin)] <- "Other Reason"
+
+y.age.min <- countData$y[countData$variable=="Total human exposures"]
+y.age.max <- countData$y[countData$variable=="Unintentional"]
+y.un.min <- countData$y[countData$variable=="Unintentional"]
+y.un.max <- countData$y[countData$variable=="Intentional"]
+y.int.min <- countData$y[countData$variable=="Intentional"]
+y.int.max <- countData$y[countData$variable=="Other Reason"]
+y.other.min <- countData$y[countData$variable=="Other Reason"]
+
+y.ms.min <- countData$y[countData$variable=="Management"]
+y.ms.max <- countData$y[countData$variable=="Medical"]
+y.mo.min <- countData$y[countData$variable=="Medical"]
+
+countData <- countData %>%
+  mutate(variableSub=ifelse(column=="Left" & y > y.age.min & y < y.age.max, "Age:",
+         ifelse(column=="Left" & y > y.un.min & y < y.un.max, "Unintentional:",
+         ifelse(column=="Left" & y > y.int.min & y < y.int.max, "Intentional:",
+         ifelse(column=="Left" & y > y.other.min, "Other:",
+         ifelse(column=="Right" & y > y.ms.min & y < y.ms.max, "ManageSite:",
+         ifelse(column=="Right" & y > y.mo.min, "MedOutcome:", "")))))))
+
+# remove the rows that aren't variables/counts
+countData <- countData %>% filter(count != "Calls", count!="exposure", count!="Site", count!="Outcome", variable!="Medical", variable!="Outcome")
+
+countData <- countData %>%
+  mutate(name=paste0(variableSub, variable))
+
+# create the data frame for this county/date
+myRow <- as.data.frame(t(as.numeric(gsub(",","",countData$count))))
+names(myRow) <- countData$name
+myRow$Year <- year
+myRow$County <- county
+myRow$fileNo <- i #to help diagnose
+
+return(myRow)
+}
+```
+
+
+```{r}
+
+d1 <- pdfMPC.page1(paste0("./data/",files[1]),1)
+myData <- d1
+
+options(warn=2)
+for (i in 2:length(files)) {
+  di <- pdfMPC.page1(paste0("./data/",files[i]),i)
+  myData <- bind_rows(myData,di)
+  print(i)
+}
+
+dim(myData)
+names(myData)
+
+#myData %>% filter(!is.na(NACenter)) %>% select(fileNo)
+#myData %>% filter(!is.na(`ReasonOther:Maryland`)) %>% select(fileNo)
+#myData %>% filter(!is.na(`NATotal human exposures`)) %>% select(fileNo)
+#myData %>% filter(!is.na(Medical)) %>% select(fileNo)
+```
+
+(1) Somerset Count 2008, the row giving the % of calls runs onto a second line
+(2) 3 counties/years have "Maryland Poison Center" at bottom of first page of pdf
+(3) LOTS of counties had issues with the indentation of "Types of calls" and "Reason for exposure" that caused issues with designating the "Other Reason category based on indenting"  Removed these columns first before doing the rest.
+(4) Weird spacing for "Medical Outcome" for Calvert 2017
+
+
+Now just a matter of cleaning up typos!  Need to do this carefully to be sure I'm combining things sensibly!
+```{r}
+sort(names(myData))
+
+# Age recoding
+### Unknown
+pairs(~`Age:Unknown` + `Age:Unknown age` + `Age:Unknown Age`, data=myData )
+myData <- myData %>% 
+  mutate(`Age:Unknown`=ifelse(!is.na(`Age:Unknown`), `Age:Unknown`, `Age:Unknown age`)) %>% select(-`Age:Unknown age`) %>%
+  mutate(`Age:Unknown`=ifelse(!is.na(`Age:Unknown`), `Age:Unknown`, `Age:Unknown Age`)) %>% select(-`Age:Unknown Age`)
+### Unknown Adult (without age specified)
+pairs(~`Age:Unknown adult` + `Age:Unknown Adult`, data=myData )
+myData <- myData %>% 
+  mutate(`Age:Unknown adult`=ifelse(!is.na(`Age:Unknown adult`), `Age:Unknown adult`, `Age:Unknown Adult`)) %>% select(-`Age:Unknown Adult`)
+
+# Management Site recoding
+### Other/Unknown
+pairs(~`ManageSite:Other/Unknown` + `ManageSite:Other/unknown` + `ManageSite:Other` + `ManageSite:Unknown` , data=myData )
+myData <- myData %>% rowwise() %>% mutate(`ManageSite:temp`=ifelse(!is.na(`ManageSite:Other`) | !is.na(`ManageSite:Unknown`), sum(`ManageSite:Other`,`ManageSite:Unknown`, na.rm=TRUE),NA)) %>% select(-`ManageSite:Other`, -`ManageSite:Unknown`)
+pairs(~`ManageSite:Other/Unknown` + `ManageSite:Other/unknown` +`ManageSite:temp` , data=myData )
+myData <- myData %>% 
+  mutate(`ManageSite:Other/Unknown`=ifelse(!is.na(`ManageSite:Other/Unknown`), `ManageSite:Other/Unknown`, `ManageSite:Other/unknown`)) %>% select(-`ManageSite:Other/unknown`) %>%
+  mutate(`ManageSite:Other/Unknown`=ifelse(!is.na(`ManageSite:Other/Unknown`), `ManageSite:Other/Unknown`, `ManageSite:temp`)) %>% select(-`ManageSite:temp`)
+
+# Other Reason recoding
+### Contamination/Tampering
+pairs(~`Other:Contamination/Tampering` + `Other:Contamination/tampering`, data=myData )
+myData <- myData %>% 
+  mutate(`Other:Contamination/Tampering`=ifelse(!is.na(`Other:Contamination/Tampering`), `Other:Contamination/Tampering`, `Other:Contamination/tampering`)) %>% select(-`Other:Contamination/tampering`)
+### Other/Unknown
+pairs(~`Other:Other/Unknown` + `Other:Other`+ `Other:Other?Unknown` + `Other:Other/Unknown Reason` + `Other:Unknown`+ `Other:Unknown Reason`+ `Other:Unknown/Other`, data=myData )
+myData <- myData %>% rowwise() %>% mutate(`Other:temp`=ifelse(!is.na(`Other:Other`) | !is.na(`Other:Unknown`), sum(`Other:Other`,`Other:Unknown`, na.rm=TRUE),NA)) %>% select(-`Other:Other`, -`Other:Unknown`)
+pairs(~`Other:Other/Unknown` + `Other:temp`+ `Other:Other?Unknown` + `Other:Other/Unknown Reason` + `Other:Unknown Reason`+ `Other:Unknown/Other`, data=myData )
+myData <- myData %>% 
+  mutate(`Other:Other/Unknown`=ifelse(!is.na(`Other:Other/Unknown`), `Other:Other/Unknown`, `Other:temp`)) %>% select(-`Other:temp`) %>%
+  mutate(`Other:Other/Unknown`=ifelse(!is.na(`Other:Other/Unknown`), `Other:Other/Unknown`, `Other:Other?Unknown`)) %>% select(-`Other:Other?Unknown`) %>% 
+  mutate(`Other:Other/Unknown`=ifelse(!is.na(`Other:Other/Unknown`), `Other:Other/Unknown`, `Other:Other/Unknown Reason`)) %>% select(-`Other:Other/Unknown Reason`) %>% 
+  mutate(`Other:Other/Unknown`=ifelse(!is.na(`Other:Other/Unknown`), `Other:Other/Unknown`, `Other:Unknown Reason`)) %>% select(-`Other:Unknown Reason`) %>% 
+  mutate(`Other:Other/Unknown`=ifelse(!is.na(`Other:Other/Unknown`), `Other:Other/Unknown`, `Other:Unknown/Other`)) %>% select(-`Other:Unknown/Other`)
+
+# Unintentional recoding
+### Bite or sting
+pairs(~`Unintentional:Bite or sting` + `Unintentional:Bite or Sting`, data=myData )
+myData <- myData %>% 
+  mutate(`Unintentional:Bite or sting`=ifelse(!is.na(`Unintentional:Bite or sting`), `Unintentional:Bite or sting`, `Unintentional:Bite or Sting`)) %>% select(-`Unintentional:Bite or Sting`)
+### Food poisoning
+pairs(~`Unintentional:Food poisoning` + `Unintentional:Food Poisoning`, data=myData )
+myData <- myData %>% 
+  mutate(`Unintentional:Food poisoning`=ifelse(!is.na(`Unintentional:Food poisoning`), `Unintentional:Food poisoning`, `Unintentional:Food Poisoning`)) %>% select(-`Unintentional:Food Poisoning`)
+###Other/Unknown
+pairs(~`Unintentional:Other/Unknown` + `Unintentional:Unkknown` + `Unintentional:Unknown`, data=myData )
+myData <- myData %>% 
+  mutate(`Unintentional:Other/Unknown`=ifelse(!is.na(`Unintentional:Other/Unknown`), `Unintentional:Other/Unknown`, `Unintentional:Unkknown`)) %>% select(-`Unintentional:Unkknown`) %>%
+  mutate(`Unintentional:Other/Unknown`=ifelse(!is.na(`Unintentional:Other/Unknown`), `Unintentional:Other/Unknown`, `Unintentional:Unknown`)) %>% select(-`Unintentional:Unknown`)
+
+sort(names(myData))
+```
+
+Finally, order the data in a meaningful way:
+```{r}
+myData <- myData %>%
+  select(sort(names(myData)))
+
+myData <- myData %>%
+  select(fileNo, County, Year, `Total human exposures`, `Animal Exposures`, `Information Calls`, `Age:< 12 months`, `Age:1 year`, `Age:2 years`, `Age:3 years`, `Age:4 years`, `Age:5 years`, `Age:6-12 years`, `Age:13-19 years`, `Age:20-59 years`, `Age:>60 years`, everything())
+```
+
+Now write this data to a .csv file:
+```{r}
+write_csv(myData, "MPCdata.csv")
 ```
