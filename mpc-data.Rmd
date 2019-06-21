@@ -889,3 +889,49 @@ Now write this data to a .csv file:
 ```{r}
 write_csv(myData, "MPCdata.csv")
 ```
+
+After perusing the .csv file, I think I can clean up the age variables a little bit more by collapsing into just an adult category and then an unknown category and unknown child category
+```{r}
+names(myData)
+
+myData %>% filter(!is.na(`Age:<60 years`))
+#After looking at the pdfs for Caroline County for 2010+, this is clearly a typo that should read `Age:>60 years`
+pairs(~`Age:>60 years` + `Age:<60 years`, data=myData )
+myData <- myData %>% 
+  mutate(`Age:>60 years`=ifelse(!is.na(`Age:>60 years`), `Age:>60 years`, `Age:<60 years`)) %>% select(-`Age:<60 years`)
+
+myData %>% filter(!is.na(`Age:Adult`)) %>% ungroup() %>% group_by(Year) %>% summarize(n=n())
+myData %>% filter(!is.na(`Age:20-59 years`)) %>% ungroup() %>% group_by(Year) %>% summarize(n=n())
+myData %>% filter(!is.na(`Age:>60 years`)) %>% ungroup() %>% group_by(Year) %>% summarize(n=n())
+pairs(~`Age:>60 years` + `Age:Adult` + `Age:20-59 years`, data=myData )
+#It's clear that the "Adult" category encompasses the 20-59 and >60 categories. From 2006-2009 they used the adult category.  From 2010 on, they started splitting adult into two groups. I will re-create this Adult category for all years and leave the smaller categories for the later years
+myData <- myData %>% mutate(`Age:Adult`=ifelse(Year < 2010, `Age:Adult`, `Age:>60 years`+`Age:20-59 years`))
+
+
+#Now have noticed a discrepancy with the years in that in 2014 there are 25 counties and in 2015 there are only 23
+myData %>% filter(Year==2014) %>% select(County, Year, fileNo) %>% as.data.frame()
+#It looks like Somerset is showing up twice
+#file numbers 211 and 235
+
+files[211]
+files[235]
+
+#The data files are in fact different (have different numbers) but both are labeled 2014 on the front of the document.  However, the one from the 2015 link is labeled 2015 on the 2nd page of the document, so I will assume this is a typo and assign this the year 2015 for fileNo235
+myData$Year[myData$fileNo==235] <- 2015
+
+#Finally check a few more age things
+myData %>% filter(!is.na(`Age:Unknown`))%>% ungroup() %>% group_by(Year) %>% summarize(n=n()) 
+myData %>% filter(!is.na(`Age:Unknown adult`))%>% ungroup() %>% group_by(Year) %>% summarize(n=n()) 
+myData %>% filter(!is.na(`Age:Unknown child`))%>% ungroup() %>% group_by(Year) %>% summarize(n=n()) 
+#I think this "Unknown Adult" should really be incorporated into the "Adult" category for these years 2010+, since they couldn't be put into an age range, but we do know they are adults.  But also keep this category separate
+myData <- myData %>% mutate(`Age:Adult`=ifelse(Year < 2010, `Age:Adult`, 
+                                               ifelse(!is.na(`Age:Unknown adult`),`Age:>60 years`+`Age:20-59 years` + `Age:Unknown adult`,
+                                                      `Age:>60 years`+`Age:20-59 years`)))
+
+
+```
+
+Now write this data to a .csv file again:
+```{r}
+write_csv(myData, "MPCdata.csv")
+```
