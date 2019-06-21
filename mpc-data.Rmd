@@ -935,3 +935,28 @@ Now write this data to a .csv file again:
 ```{r}
 write_csv(myData, "MPCdata.csv")
 ```
+
+Last this I want to do is make the names easier to work with (remove : and / and spaces):
+```{r}
+names(myData)
+namesNew <- names(myData)
+namesNew <- gsub(pattern=":",replacement="_", namesNew)
+namesNew <- gsub(pattern=" or s",replacement="/S", namesNew)
+namesNew <- gsub(pattern="/",replacement=".", namesNew)
+namesNew <- gsub(pattern="<",replacement="Under", namesNew)
+namesNew <- gsub(pattern=">",replacement="Over", namesNew)
+namesNew <- gsub(pattern="years",replacement="yr", namesNew)
+namesNew <- gsub(pattern="year",replacement="yr", namesNew)
+namesNew <- gsub(pattern="months",replacement="mo", namesNew)
+namesNew <- gsub(pattern=" p",replacement=" P", namesNew)
+namesNew <- gsub(pattern=" s",replacement=" S", namesNew)
+namesNew <- gsub(pattern=" a",replacement=" A", namesNew)
+namesNew <- gsub(pattern=" c",replacement=" C", namesNew)
+namesNew <- gsub(pattern="Site.non",replacement="Site.Non", namesNew)
+namesNew <- gsub(pattern=" ",replacement="", namesNew)
+```
+
+Now write this data to a .csv file again:
+```{r}
+write_csv(myData, "MPCdata.csv")
+```
