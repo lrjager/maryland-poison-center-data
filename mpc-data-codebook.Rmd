@@ -10,28 +10,28 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
-* `fileNo` 
-* `County` 
-* `Year` 
-* `Totalhumanexposures` 
-* `AnimalExposures` 
-* `InformationCalls` 
-* `Age_Under12mo` 
-* `Age_1yr` 
-* `Age_2yr` 
-* `Age_3yr` 
-* `Age_4yr` 
-* `Age_5yr` 
-* `Age_6-12yr` 
-* `Age_13-19yr` 
-* `Age_20-59yr` 
-* `Age_Over60yr` 
-* `Age_Adult` 
-* `Age_Unknown` 
-* `Age_UnknownAdult` 
-* `Age_UnknownChild` 
-* `Intentional` 
-* `Intentional_Abuse` 
+* `fileNo` : id number for county/year combination
+* `County` : county name, from 24 Maryland county (or county equivalents)
+* `Year` : year, from 2006-2018
+* `Totalhumanexposures` : total number of human exposures
+* `AnimalExposures` : total number of animal exposures
+* `InformationCalls` : total number of information calls
+* `Age_Under12mo` : number of exposures for children under 12 months of age
+* `Age_1yr` : number of human exposures for children aged 1 year
+* `Age_2yr` : number of human exposures for children aged 2 years
+* `Age_3yr` : number of humanexposures for children aged 3 years
+* `Age_4yr` : number of human exposures for children aged 4 years
+* `Age_5yr` : number of human exposures for children aged 5 years
+* `Age_6-12yr` : number of human exposures for children aged 6 through 12 years
+* `Age_13-19yr` : number of human exposures for children aged 13 through 19 years
+* `Age_20-59yr` : number of human exposures for adults aged 20 through 59 years
+* `Age_Over60yr` : number of human exposures for adults 60 years or older
+* `Age_Adult` : number of human exposures for adults (older than 19)
+* `Age_Unknown` : number of human exposures with unknown age
+* `Age_UnknownAdult` : number of human exposures for adult (older than 19) with unknown age
+* `Age_UnknownChild` : number of human exposures for child (19 or younger) with unknown age
+* `Intentional` : number of intentional human exposures
+* `Intentional_Abuse` : number of intentional human exposures
 * `Intentional_Misuse` 
 * `Intentional_SuspectedSuicide` 
 * `Intentional_Unknown`
