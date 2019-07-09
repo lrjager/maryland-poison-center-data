@@ -1,13 +1,6 @@
----
-title: "Maryland Poison Center (MPC) data CODEBOOK"
-author: "Leah Jager"
-date: "`r format(Sys.time(), '%m/%d/%Y')`"
-output: html_document
----
-
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
+# Maryland Poison Center (MPC) data CODEBOOK
+## Leah Jager
+### 7/7/2019
 
 These variable definitions are my best attempt to describe what the variables are measuring based on information on the [Maryland Poison Center website](https://www.mdpoison.com/).  I will update these descriptions as I discover more information.
  
